@@ -23,6 +23,10 @@ document.addEventListener("DOMContentLoaded", () => {
     let lastTapTime = 0;
     let lastTapX = 0;
     let lastTapY = 0;
+    let isSeeking = false;
+    let seekStartX = 0;
+    let seekStartTime = 0;
+    let seekBlockSize = 30; // Tamanho do bloco de tempo em segundos
 
     // Prevenir comportamento padrão de scroll/gestos
     app.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
@@ -161,24 +165,28 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!isHorizontalScroll && !isScrolling) {
             if (Math.abs(deltaX) > Math.abs(deltaY)) {
                 isHorizontalScroll = true;
+                isSeeking = true;
+                seekStartX = currentX;
+                seekStartTime = currentVideo ? currentVideo.currentTime : 0;
             } else if (Math.abs(deltaY) > 10) {
                 isScrolling = true;
             }
         }
         
-        if (isHorizontalScroll && currentVideo) {
-            // Controlar a timeline do vídeo
+        if (isSeeking && currentVideo) {
+            // Controlar a timeline do vídeo com blocos de 30 segundos
             const videoDuration = currentVideo.duration;
             const videoWidth = currentVideo.offsetWidth;
             const seekPercentage = deltaX / videoWidth;
-            const seekTime = currentVideo.currentTime + (seekPercentage * videoDuration);
             
-            // Limitar o seekTime entre 0 e a duração do vídeo
-            const newTime = Math.max(0, Math.min(seekTime, videoDuration));
+            // Calcular quantos blocos de 30 segundos foram percorridos
+            const blocksMoved = Math.round(seekPercentage * (videoDuration / seekBlockSize));
+            const newTime = Math.max(0, Math.min(seekStartTime + (blocksMoved * seekBlockSize), videoDuration));
+            
             currentVideo.currentTime = newTime;
             
             // Mostrar indicador de progresso
-            showSeekIndicator(newTime, videoDuration);
+            showSeekIndicator(newTime, videoDuration, blocksMoved);
         } else if (isScrolling) {
             // Aplicar transformação ao vídeo atual
             if (currentVideo) {
@@ -189,7 +197,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function showSeekIndicator(currentTime, duration) {
+    function showSeekIndicator(currentTime, duration, blocksMoved) {
         // Remover indicador anterior se existir
         const existingIndicator = document.querySelector('.seek-indicator');
         if (existingIndicator) {
@@ -202,10 +210,13 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const progress = (currentTime / duration) * 100;
         const timeText = formatTime(currentTime) + ' / ' + formatTime(duration);
+        const directionText = blocksMoved > 0 ? 'Avançar' : blocksMoved < 0 ? 'Retroceder' : '';
+        const blocksText = Math.abs(blocksMoved) > 0 ? `${Math.abs(blocksMoved)} blocos` : '';
         
         indicator.innerHTML = `
             <div class="seek-progress" style="width: ${progress}%"></div>
             <div class="seek-time">${timeText}</div>
+            <div class="seek-direction">${directionText} ${blocksText}</div>
         `;
         
         videoFeed.appendChild(indicator);
@@ -241,14 +252,18 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
         
-        if (isHorizontalScroll) {
+        if (isSeeking) {
             // Finalizar o seek
             hideSeekIndicator();
+            isSeeking = false;
         } else if (Math.abs(deltaY) > 100) {
             handleSwipe();
         } else {
             resetVideoPosition();
         }
+        
+        isHorizontalScroll = false;
+        isScrolling = false;
     }
 
     function hideSeekIndicator() {
@@ -437,6 +452,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Inicializar com a view For You
     switchView("forYou");
+
+    // Adicionar suporte para teclas de seta para navegar nos blocos de tempo
+    document.addEventListener('keydown', (event) => {
+        if (!currentVideo) return;
+        
+        if (event.key === 'ArrowLeft') {
+            // Retroceder um bloco
+            const newTime = Math.max(0, currentVideo.currentTime - seekBlockSize);
+            currentVideo.currentTime = newTime;
+            showSeekIndicator(newTime, currentVideo.duration, -1);
+        } else if (event.key === 'ArrowRight') {
+            // Avançar um bloco
+            const newTime = Math.min(currentVideo.duration, currentVideo.currentTime + seekBlockSize);
+            currentVideo.currentTime = newTime;
+            showSeekIndicator(newTime, currentVideo.duration, 1);
+        }
+    });
 });
 
 document.addEventListener("DOMContentLoaded", async () => {
