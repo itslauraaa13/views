@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <title>Views</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>Views</h1>
+        </header>
+        <main>
+            <div id="video-feed" class="video-container">
+                <!-- Vídeos serão carregados aqui -->
+            </div>
+            <div id="folders-view" class="folders-container" style="display: none;">
+                <div class="folders-grid">
+                    <!-- Pastas serão carregadas aqui -->
+                </div>
+            </div>
+        </main>
+        <footer>
+            <nav class="bottom-nav">
+                <button id="forYouBtn" class="active">For You</button>
+                <input type="file" id="videoUpload" accept="video/*" multiple hidden>
+                <button id="uploadBtn">Upload</button>
+                <button id="foldersBtn">Pastas</button>
+            </nav>
+        </footer>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
