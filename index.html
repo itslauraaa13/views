@@ -21,6 +21,36 @@
                     <!-- Pastas serão carregadas aqui -->
                 </div>
             </div>
+            <div id="profile-view" class="profile-container" style="display: none;">
+                <div class="profile-header">
+                    <div class="profile-avatar">
+                        <img id="profile-avatar-img" src="default-avatar.svg" alt="Avatar">
+                    </div>
+                    <h2 id="profile-username">Usuário</h2>
+                    <div class="profile-stats">
+                        <div class="stat">
+                            <span id="profile-videos-count">0</span>
+                            <span>Vídeos</span>
+                        </div>
+                        <div class="stat">
+                            <span id="profile-folders-count">0</span>
+                            <span>Pastas</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="profile-content">
+                    <div class="profile-tabs">
+                        <button id="profile-videos-tab" class="active">Meus Vídeos</button>
+                        <button id="profile-favorites-tab">Favoritos</button>
+                    </div>
+                    <div id="profile-videos-grid" class="profile-grid">
+                        <!-- Vídeos do usuário serão carregados aqui -->
+                    </div>
+                    <div id="profile-favorites-grid" class="profile-grid" style="display: none;">
+                        <!-- Vídeos favoritos serão carregados aqui -->
+                    </div>
+                </div>
+            </div>
         </main>
         <footer>
             <nav class="bottom-nav">
@@ -28,9 +58,11 @@
                 <input type="file" id="videoUpload" accept="video/*" multiple hidden>
                 <button id="uploadBtn">Upload</button>
                 <button id="foldersBtn">Pastas</button>
+                <button id="profileBtn">Perfil</button>
             </nav>
         </footer>
     </div>
+    <script src="db.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

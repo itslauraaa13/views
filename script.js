@@ -2,11 +2,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const app = document.getElementById("app");
     const videoFeed = document.getElementById("video-feed");
     const foldersView = document.getElementById("folders-view");
+    const profileView = document.getElementById("profile-view");
     const uploadBtn = document.getElementById("uploadBtn");
     const videoUpload = document.getElementById("videoUpload");
     const forYouBtn = document.getElementById("forYouBtn");
     const foldersBtn = document.getElementById("foldersBtn");
+    const profileBtn = document.getElementById("profileBtn");
     const foldersGrid = document.querySelector(".folders-grid");
+    const profileVideosGrid = document.getElementById("profile-videos-grid");
+    const profileFavoritesGrid = document.getElementById("profile-favorites-grid");
+    const profileVideosTab = document.getElementById("profile-videos-tab");
+    const profileFavoritesTab = document.getElementById("profile-favorites-tab");
+    const profileUsername = document.getElementById("profile-username");
+    const profileAvatarImg = document.getElementById("profile-avatar-img");
+    const profileVideosCount = document.getElementById("profile-videos-count");
+    const profileFoldersCount = document.getElementById("profile-folders-count");
 
     let videos = [];
     let currentIndex = 0;
@@ -27,18 +37,22 @@ document.addEventListener("DOMContentLoaded", () => {
     let seekStartX = 0;
     let seekStartTime = 0;
     let seekBlockSize = 30; // Tamanho do bloco de tempo em segundos
+    let currentUser = null;
 
     // Prevenir comportamento padrão de scroll/gestos
     app.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
-    // Carregar pastas do localStorage
-    loadFolders();
+    // Inicializar o aplicativo
+    initApp();
 
     // Event Listeners
     uploadBtn.addEventListener("click", () => videoUpload.click());
     forYouBtn.addEventListener("click", () => switchView("forYou"));
     foldersBtn.addEventListener("click", () => switchView("folders"));
+    profileBtn.addEventListener("click", () => switchView("profile"));
     videoUpload.addEventListener("change", handleUpload);
+    profileVideosTab.addEventListener("click", () => switchProfileTab("videos"));
+    profileFavoritesTab.addEventListener("click", () => switchProfileTab("favorites"));
     
     // Melhor suporte para gestos
     videoFeed.addEventListener("touchstart", handleTouchStart, { passive: true });
@@ -48,82 +62,340 @@ document.addEventListener("DOMContentLoaded", () => {
     videoFeed.addEventListener("click", handleVideoClick);
     videoFeed.addEventListener("dblclick", handleVideoDoubleClick);
 
-    function loadFolders() {
-        const savedFolders = localStorage.getItem("folders");
-        if (savedFolders) {
-            folders = JSON.parse(savedFolders);
-            renderFolders();
+    // Inicializar o aplicativo
+    async function initApp() {
+        // Verificar se o banco de dados está pronto
+        if (!window.db || !window.db.db) {
+            console.log("Aguardando inicialização do banco de dados...");
+            setTimeout(initApp, 100);
+            return;
         }
+
+        // Verificar se já existe um usuário
+        const users = await window.db.getAll('users');
+        if (users.length === 0) {
+            // Criar um usuário padrão
+            currentUser = await window.db.createUser({
+                username: "Usuário",
+                avatar: "default-avatar.svg"
+            });
+            console.log("Usuário padrão criado:", currentUser);
+        } else {
+            currentUser = users[0];
+            console.log("Usuário existente carregado:", currentUser);
+        }
+
+        // Carregar pastas do banco de dados
+        await loadFolders();
+        
+        // Carregar vídeos do banco de dados
+        await loadVideos();
+        
+        // Atualizar a interface do perfil
+        updateProfileUI();
+        
+        // Inicializar com a view For You
+        switchView("forYou");
     }
 
-    function saveFolders() {
-        localStorage.setItem("folders", JSON.stringify(folders));
+    // Carregar pastas do banco de dados
+    async function loadFolders() {
+        if (!currentUser) return;
+        
+        const userFolders = await window.db.getUserFolders(currentUser.id);
+        folders = {};
+        
+        for (const folder of userFolders) {
+            folders[folder.id] = {
+                name: folder.name,
+                videos: []
+            };
+        }
+        
+        renderFolders();
     }
 
+    // Salvar pastas no banco de dados
+    async function saveFolders() {
+        if (!currentUser) return;
+        
+        // Obter todas as pastas existentes do usuário
+        const existingFolders = await window.db.getUserFolders(currentUser.id);
+        const existingFolderIds = existingFolders.map(f => f.id);
+        
+        // Criar novas pastas
+        for (const [folderId, folderData] of Object.entries(folders)) {
+            if (!existingFolderIds.includes(folderId)) {
+                await window.db.createFolder({
+                    id: folderId,
+                    userId: currentUser.id,
+                    name: folderData.name
+                });
+            }
+        }
+        
+        // Atualizar contagem de pastas no perfil
+        updateProfileUI();
+    }
+
+    // Renderizar pastas na interface
     function renderFolders() {
         foldersGrid.innerHTML = "";
-        Object.keys(folders).forEach(folderName => {
+        Object.entries(folders).forEach(([folderId, folderData]) => {
             const folderItem = document.createElement("div");
             folderItem.className = "folder-item";
             folderItem.innerHTML = `
                 <img src="folder-icon.svg" alt="Pasta">
-                <div>${folderName}</div>
-                <div class="video-count">${folders[folderName].length} vídeos</div>
+                <div>${folderData.name}</div>
+                <div class="video-count">${folderData.videos.length} vídeos</div>
             `;
-            folderItem.addEventListener("click", () => openFolder(folderName));
+            folderItem.addEventListener("click", () => openFolder(folderId));
             foldersGrid.appendChild(folderItem);
         });
     }
 
-    function openFolder(folderName) {
-        videos = folders[folderName];
+    // Abrir uma pasta
+    async function openFolder(folderId) {
+        if (!currentUser) return;
+        
+        // Carregar vídeos da pasta
+        const folderVideos = await window.db.getFolderVideos(folderId);
+        videos = folderVideos.map(video => video.url);
+        
         if (videos.length > 0) {
             currentIndex = Math.floor(Math.random() * videos.length);
         }
+        
         switchView("forYou");
         playForYouVideo();
     }
 
-    function handleUpload(event) {
+    // Manipular upload de vídeos
+    async function handleUpload(event) {
+        if (!currentUser) return;
+        
         const files = event.target.files;
         const folderName = prompt("Digite o nome da pasta:");
         
         if (!folderName) return;
 
-        if (!folders[folderName]) {
-            folders[folderName] = [];
+        // Criar uma nova pasta no banco de dados
+        const newFolder = await window.db.createFolder({
+            userId: currentUser.id,
+            name: folderName
+        });
+        
+        if (!folders[newFolder.id]) {
+            folders[newFolder.id] = {
+                name: folderName,
+                videos: []
+            };
         }
 
+        // Processar cada arquivo
         for (let file of files) {
             const url = URL.createObjectURL(file);
-            folders[folderName].push(url);
+            
+            // Criar thumbnail (simplificado)
+            const thumbnail = await createThumbnail(file);
+            
+            // Adicionar vídeo ao banco de dados
+            const video = await window.db.addVideo({
+                userId: currentUser.id,
+                folderId: newFolder.id,
+                title: file.name,
+                url: url,
+                thumbnail: thumbnail,
+                duration: 0 // Será atualizado quando o vídeo for carregado
+            });
+            
+            // Adicionar à lista de vídeos da pasta
+            folders[newFolder.id].videos.push(url);
+            
+            // Adicionar à lista geral de vídeos
+            videos.push(url);
         }
 
         saveFolders();
         renderFolders();
+        updateProfileUI();
         switchView("folders");
     }
 
+    // Criar thumbnail para o vídeo
+    function createThumbnail(file) {
+        return new Promise((resolve) => {
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            video.addEventListener('loadeddata', () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg'));
+                URL.revokeObjectURL(video.src);
+            });
+            video.addEventListener('error', () => {
+                resolve(null);
+            });
+        });
+    }
+
+    // Carregar vídeos do banco de dados
+    async function loadVideos() {
+        if (!currentUser) return;
+        
+        const userVideos = await window.db.getUserVideos(currentUser.id);
+        videos = userVideos.map(video => video.url);
+        
+        // Atualizar a contagem de vídeos no perfil
+        updateProfileUI();
+    }
+
+    // Alternar entre as views
     function switchView(view) {
         if (view === "forYou") {
             videoFeed.style.display = "block";
             foldersView.style.display = "none";
+            profileView.style.display = "none";
             forYouBtn.classList.add("active");
             foldersBtn.classList.remove("active");
+            profileBtn.classList.remove("active");
             if (videos.length > 0) {
                 playForYouVideo();
             }
-        } else {
+        } else if (view === "folders") {
             if (currentVideo) {
                 currentVideo.pause();
             }
             videoFeed.style.display = "none";
             foldersView.style.display = "block";
+            profileView.style.display = "none";
             foldersBtn.classList.add("active");
             forYouBtn.classList.remove("active");
+            profileBtn.classList.remove("active");
+        } else if (view === "profile") {
+            if (currentVideo) {
+                currentVideo.pause();
+            }
+            videoFeed.style.display = "none";
+            foldersView.style.display = "none";
+            profileView.style.display = "block";
+            profileBtn.classList.add("active");
+            forYouBtn.classList.remove("active");
+            foldersBtn.classList.remove("active");
+            
+            // Carregar vídeos do perfil
+            loadProfileVideos();
         }
     }
 
+    // Alternar entre as abas do perfil
+    function switchProfileTab(tab) {
+        if (tab === "videos") {
+            profileVideosTab.classList.add("active");
+            profileFavoritesTab.classList.remove("active");
+            profileVideosGrid.style.display = "grid";
+            profileFavoritesGrid.style.display = "none";
+        } else if (tab === "favorites") {
+            profileVideosTab.classList.remove("active");
+            profileFavoritesTab.classList.add("active");
+            profileVideosGrid.style.display = "none";
+            profileFavoritesGrid.style.display = "grid";
+            
+            // Carregar vídeos favoritos
+            loadProfileFavorites();
+        }
+    }
+
+    // Carregar vídeos do perfil
+    async function loadProfileVideos() {
+        if (!currentUser) return;
+        
+        profileVideosGrid.innerHTML = "";
+        
+        const userVideos = await window.db.getUserVideos(currentUser.id);
+        
+        for (const video of userVideos) {
+            const videoItem = createVideoItem(video);
+            profileVideosGrid.appendChild(videoItem);
+        }
+    }
+
+    // Carregar vídeos favoritos
+    async function loadProfileFavorites() {
+        if (!currentUser) return;
+        
+        profileFavoritesGrid.innerHTML = "";
+        
+        // Obter vídeos marcados como favoritos pelo usuário
+        const favoriteVideos = await window.db.getFavoriteVideos(currentUser.id);
+        
+        // Obter vídeos favoritados de outros usuários
+        const userFavorites = await window.db.getAllByIndex('favorites', 'userId', currentUser.id);
+        const favoriteVideoIds = userFavorites.map(f => f.videoId);
+        
+        for (const videoId of favoriteVideoIds) {
+            const video = await window.db.getVideo(videoId);
+            if (video) {
+                const videoItem = createVideoItem(video);
+                profileFavoritesGrid.appendChild(videoItem);
+            }
+        }
+    }
+
+    // Criar item de vídeo para o grid
+    function createVideoItem(video) {
+        const videoItem = document.createElement("div");
+        videoItem.className = "profile-video-item";
+        
+        // Usar thumbnail se disponível, caso contrário usar um placeholder
+        const thumbnail = video.thumbnail || "video-placeholder.png";
+        
+        videoItem.innerHTML = `
+            <img src="${thumbnail}" alt="${video.title}">
+            <div class="video-duration">${formatTime(video.duration)}</div>
+            <div class="favorite-icon">${video.favorite ? '❤️' : ''}</div>
+        `;
+        
+        // Adicionar evento de clique para reproduzir o vídeo
+        videoItem.addEventListener("click", () => {
+            // Encontrar o índice do vídeo na lista geral
+            const index = videos.indexOf(video.url);
+            if (index !== -1) {
+                currentIndex = index;
+                switchView("forYou");
+                playForYouVideo();
+            } else {
+                // Se o vídeo não estiver na lista geral, adicioná-lo
+                videos.push(video.url);
+                currentIndex = videos.length - 1;
+                switchView("forYou");
+                playForYouVideo();
+            }
+        });
+        
+        return videoItem;
+    }
+
+    // Atualizar a interface do perfil
+    async function updateProfileUI() {
+        if (!currentUser) return;
+        
+        // Atualizar informações do usuário
+        profileUsername.textContent = currentUser.username;
+        profileAvatarImg.src = currentUser.avatar;
+        
+        // Atualizar contagens
+        const userVideos = await window.db.getUserVideos(currentUser.id);
+        const userFolders = await window.db.getUserFolders(currentUser.id);
+        
+        profileVideosCount.textContent = userVideos.length;
+        profileFoldersCount.textContent = userFolders.length;
+    }
+
+    // Manipular toque inicial
     function handleTouchStart(event) {
         if (isTransitioning) return;
         
@@ -153,6 +425,7 @@ document.addEventListener("DOMContentLoaded", () => {
         lastTapY = touchStartY;
     }
 
+    // Manipular movimento do toque
     function handleTouchMove(event) {
         if (isTransitioning) return;
         
@@ -197,6 +470,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Mostrar indicador de seek
     function showSeekIndicator(currentTime, duration, blocksMoved) {
         // Remover indicador anterior se existir
         const existingIndicator = document.querySelector('.seek-indicator');
@@ -229,6 +503,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }, 1000);
     }
 
+    // Formatar tempo em segundos para mm:ss
     function formatTime(seconds) {
         if (isNaN(seconds)) return '0:00';
         
@@ -237,6 +512,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
     }
 
+    // Manipular fim do toque
     function handleTouchEnd(event) {
         if (isTransitioning) return;
         
@@ -266,6 +542,7 @@ document.addEventListener("DOMContentLoaded", () => {
         isScrolling = false;
     }
 
+    // Esconder indicador de seek
     function hideSeekIndicator() {
         const indicator = document.querySelector('.seek-indicator');
         if (indicator) {
@@ -273,6 +550,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Manipular clique no vídeo
     function handleVideoClick(event) {
         // Prevenir que o clique simples seja acionado após um duplo clique
         if (Date.now() - lastTapTime < 300) return;
@@ -280,10 +558,12 @@ document.addEventListener("DOMContentLoaded", () => {
         toggleVideoMute();
     }
 
+    // Manipular duplo clique no vídeo
     function handleVideoDoubleClick() {
         toggleVideoPlayback();
     }
 
+    // Alternar mudo do vídeo
     function toggleVideoMute() {
         if (currentVideo) {
             currentVideo.muted = !currentVideo.muted;
@@ -293,6 +573,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Mostrar indicador de mudo
     function showMuteIndicator(isMuted) {
         // Remover indicador anterior se existir
         const existingIndicator = document.querySelector('.mute-indicator');
@@ -315,6 +596,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }, 1000);
     }
 
+    // Resetar posição do vídeo
     function resetVideoPosition() {
         if (currentVideo) {
             currentVideo.style.transform = 'translateY(0)';
@@ -322,6 +604,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Alternar reprodução do vídeo
     function toggleVideoPlayback() {
         if (currentVideo) {
             if (currentVideo.paused) {
@@ -335,6 +618,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Mostrar indicador de play/pause
     function showPlayPauseIndicator(isPlaying) {
         // Remover indicador anterior se existir
         const existingIndicator = document.querySelector('.play-pause-indicator');
@@ -357,6 +641,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }, 1000);
     }
 
+    // Manipular rolagem da roda do mouse
     function handleWheel(event) {
         if (isTransitioning) return;
         event.preventDefault();
@@ -368,6 +653,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Manipular swipe
     function handleSwipe() {
         const diff = touchStartY - touchEndY;
         if (Math.abs(diff) > 100) { // Aumentado o threshold para swipe
@@ -381,18 +667,21 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Próximo vídeo
     function nextVideo() {
         if (isTransitioning || videos.length <= 1) return;
         currentIndex = (currentIndex + 1) % videos.length;
         playForYouVideo('up');
     }
 
+    // Vídeo anterior
     function previousVideo() {
         if (isTransitioning || videos.length <= 1) return;
         currentIndex = (currentIndex - 1 + videos.length) % videos.length;
         playForYouVideo('down');
     }
 
+    // Reproduzir vídeo na página For You
     function playForYouVideo(direction = null) {
         if (videos.length === 0 || isTransitioning) return;
 
@@ -450,9 +739,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Inicializar com a view For You
-    switchView("forYou");
-
     // Adicionar suporte para teclas de seta para navegar nos blocos de tempo
     document.addEventListener('keydown', (event) => {
         if (!currentVideo) return;
@@ -469,41 +755,4 @@ document.addEventListener("DOMContentLoaded", () => {
             showSeekIndicator(newTime, currentVideo.duration, 1);
         }
     });
-});
-
-document.addEventListener("DOMContentLoaded", async () => {
-    const videoFeed = document.getElementById("video-feed");
-    const response = await fetch("uploads/videos.json"); // Arquivo com a lista de vídeos
-    const videos = await response.json();
-
-    videos.forEach(videoName => {
-        const videoElement = document.createElement("video");
-        videoElement.src = `uploads/${videoName}`;
-        videoElement.controls = true;
-        videoElement.style.width = "100%";
-        videoElement.style.height = "100%";
-        videoFeed.appendChild(videoElement);
-    });
-});
-
-document.addEventListener("DOMContentLoaded", async () => {
-    const videoFeed = document.getElementById("video-feed");
-
-    try {
-        const response = await fetch("videos.json"); // Carrega a lista de vídeos
-        if (!response.ok) throw new Error("Erro ao carregar lista de vídeos");
-
-        const videos = await response.json();
-
-        videos.forEach(videoName => {
-            const videoElement = document.createElement("video");
-            videoElement.src = `uploads/${videoName}`;
-            videoElement.controls = true;
-            videoElement.style.width = "100%";
-            videoElement.style.height = "100%";
-            videoFeed.appendChild(videoElement);
-        });
-    } catch (error) {
-        console.error("Erro carregando vídeos:", error);
-    }
 });
