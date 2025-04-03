@@ -233,3 +233,60 @@ main {
         height: calc(var(--footer-height) + env(safe-area-inset-bottom));
     }
 }
+
+/* Indicadores de controle de vídeo */
+.mute-indicator,
+.play-pause-indicator,
+.seek-indicator {
+    position: absolute;
+    z-index: 10;
+    background-color: rgba(0, 0, 0, 0.5);
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    animation: fadeInOut 1s ease-in-out;
+}
+
+.mute-indicator {
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+.play-pause-indicator {
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+.seek-indicator {
+    width: 80%;
+    height: auto;
+    border-radius: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    flex-direction: column;
+    padding: 10px;
+}
+
+.seek-progress {
+    height: 4px;
+    background-color: var(--accent-color);
+    border-radius: 2px;
+    margin-bottom: 5px;
+}
+
+.seek-time {
+    color: white;
+    font-size: 14px;
+    text-align: center;
+}
+
+@keyframes fadeInOut {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+    20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+}

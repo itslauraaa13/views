@@ -13,10 +13,16 @@ document.addEventListener("DOMContentLoaded", () => {
     let folders = {};
     let touchStartY = 0;
     let touchEndY = 0;
+    let touchStartX = 0;
+    let touchEndX = 0;
     let isScrolling = false;
+    let isHorizontalScroll = false;
     let touchStartTime = 0;
     let currentVideo = null;
     let isTransitioning = false;
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
 
     // Prevenir comportamento padrão de scroll/gestos
     app.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
@@ -35,6 +41,8 @@ document.addEventListener("DOMContentLoaded", () => {
     videoFeed.addEventListener("touchmove", handleTouchMove, { passive: true });
     videoFeed.addEventListener("touchend", handleTouchEnd);
     videoFeed.addEventListener("wheel", handleWheel, { passive: false });
+    videoFeed.addEventListener("click", handleVideoClick);
+    videoFeed.addEventListener("dblclick", handleVideoDoubleClick);
 
     function loadFolders() {
         const savedFolders = localStorage.getItem("folders");
@@ -114,19 +122,64 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function handleTouchStart(event) {
         if (isTransitioning) return;
+        
         touchStartY = event.touches[0].clientY;
+        touchStartX = event.touches[0].clientX;
         touchStartTime = Date.now();
         isScrolling = false;
+        isHorizontalScroll = false;
+        
+        // Verificar se é um duplo toque
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTapTime;
+        const tapDistance = Math.sqrt(
+            Math.pow(touchStartX - lastTapX, 2) + 
+            Math.pow(touchStartY - lastTapY, 2)
+        );
+        
+        if (tapLength < 300 && tapDistance < 20) {
+            // É um duplo toque
+            handleVideoDoubleClick();
+            event.preventDefault();
+            return;
+        }
+        
+        lastTapTime = currentTime;
+        lastTapX = touchStartX;
+        lastTapY = touchStartY;
     }
 
     function handleTouchMove(event) {
         if (isTransitioning) return;
-        const currentY = event.touches[0].clientY;
-        const deltaY = currentY - touchStartY;
         
-        if (Math.abs(deltaY) > 10) {
-            isScrolling = true;
+        const currentY = event.touches[0].clientY;
+        const currentX = event.touches[0].clientX;
+        const deltaY = currentY - touchStartY;
+        const deltaX = currentX - touchStartX;
+        
+        // Determinar se é um scroll horizontal ou vertical
+        if (!isHorizontalScroll && !isScrolling) {
+            if (Math.abs(deltaX) > Math.abs(deltaY)) {
+                isHorizontalScroll = true;
+            } else if (Math.abs(deltaY) > 10) {
+                isScrolling = true;
+            }
+        }
+        
+        if (isHorizontalScroll && currentVideo) {
+            // Controlar a timeline do vídeo
+            const videoDuration = currentVideo.duration;
+            const videoWidth = currentVideo.offsetWidth;
+            const seekPercentage = deltaX / videoWidth;
+            const seekTime = currentVideo.currentTime + (seekPercentage * videoDuration);
             
+            // Limitar o seekTime entre 0 e a duração do vídeo
+            const newTime = Math.max(0, Math.min(seekTime, videoDuration));
+            currentVideo.currentTime = newTime;
+            
+            // Mostrar indicador de progresso
+            showSeekIndicator(newTime, videoDuration);
+        } else if (isScrolling) {
             // Aplicar transformação ao vídeo atual
             if (currentVideo) {
                 const transform = `translateY(${deltaY}px)`;
@@ -136,21 +189,115 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    function showSeekIndicator(currentTime, duration) {
+        // Remover indicador anterior se existir
+        const existingIndicator = document.querySelector('.seek-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
+        }
+        
+        // Criar novo indicador
+        const indicator = document.createElement('div');
+        indicator.className = 'seek-indicator';
+        
+        const progress = (currentTime / duration) * 100;
+        const timeText = formatTime(currentTime) + ' / ' + formatTime(duration);
+        
+        indicator.innerHTML = `
+            <div class="seek-progress" style="width: ${progress}%"></div>
+            <div class="seek-time">${timeText}</div>
+        `;
+        
+        videoFeed.appendChild(indicator);
+        
+        // Remover indicador após 1 segundo
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.remove();
+            }
+        }, 1000);
+    }
+
+    function formatTime(seconds) {
+        if (isNaN(seconds)) return '0:00';
+        
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.floor(seconds % 60);
+        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+
     function handleTouchEnd(event) {
         if (isTransitioning) return;
         
         touchEndY = event.changedTouches[0].clientY;
+        touchEndX = event.changedTouches[0].clientX;
         const touchDuration = Date.now() - touchStartTime;
         const deltaY = touchEndY - touchStartY;
+        const deltaX = touchEndX - touchStartX;
         
-        if (!isScrolling && touchDuration < 300) {
-            toggleVideoPlayback();
-            resetVideoPosition();
+        // Verificar se é um clique simples
+        if (!isScrolling && !isHorizontalScroll && touchDuration < 300 && Math.abs(deltaY) < 10 && Math.abs(deltaX) < 10) {
+            toggleVideoMute();
+            return;
+        }
+        
+        if (isHorizontalScroll) {
+            // Finalizar o seek
+            hideSeekIndicator();
         } else if (Math.abs(deltaY) > 100) {
             handleSwipe();
         } else {
             resetVideoPosition();
         }
+    }
+
+    function hideSeekIndicator() {
+        const indicator = document.querySelector('.seek-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+
+    function handleVideoClick(event) {
+        // Prevenir que o clique simples seja acionado após um duplo clique
+        if (Date.now() - lastTapTime < 300) return;
+        
+        toggleVideoMute();
+    }
+
+    function handleVideoDoubleClick() {
+        toggleVideoPlayback();
+    }
+
+    function toggleVideoMute() {
+        if (currentVideo) {
+            currentVideo.muted = !currentVideo.muted;
+            
+            // Mostrar indicador de mudo
+            showMuteIndicator(currentVideo.muted);
+        }
+    }
+
+    function showMuteIndicator(isMuted) {
+        // Remover indicador anterior se existir
+        const existingIndicator = document.querySelector('.mute-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
+        }
+        
+        // Criar novo indicador
+        const indicator = document.createElement('div');
+        indicator.className = 'mute-indicator';
+        indicator.innerHTML = isMuted ? '🔇' : '🔊';
+        
+        videoFeed.appendChild(indicator);
+        
+        // Remover indicador após 1 segundo
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.remove();
+            }
+        }, 1000);
     }
 
     function resetVideoPosition() {
@@ -167,7 +314,32 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 currentVideo.pause();
             }
+            
+            // Mostrar indicador de play/pause
+            showPlayPauseIndicator(!currentVideo.paused);
         }
+    }
+
+    function showPlayPauseIndicator(isPlaying) {
+        // Remover indicador anterior se existir
+        const existingIndicator = document.querySelector('.play-pause-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
+        }
+        
+        // Criar novo indicador
+        const indicator = document.createElement('div');
+        indicator.className = 'play-pause-indicator';
+        indicator.innerHTML = isPlaying ? '▶️' : '⏸️';
+        
+        videoFeed.appendChild(indicator);
+        
+        // Remover indicador após 1 segundo
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.remove();
+            }
+        }, 1000);
     }
 
     function handleWheel(event) {
